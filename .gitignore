@@ -1,0 +1,17 @@
+# Local environment variables and credentials
+**/.env
+**/.env.*
+!**/.env.example
+
+# Generated dependencies and build output
+**/node_modules/
+**/.next/
+**/.venv/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+
+# Local data and databases
+**/*.db
+**/*.db-shm
+**/*.db-wal

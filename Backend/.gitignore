@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+healthcare.db
+healthcare.db-shm
+healthcare.db-wal
+
+# Locally stored invoice PDFs (may contain personal information)
+data/claims/
