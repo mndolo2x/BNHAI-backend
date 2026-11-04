@@ -43,7 +43,12 @@ class PatientRecord(Base):
     record_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )
-    facility_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    facility_id: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("facilities.facility_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
 
 
 class EncounterRecord(Base):
@@ -62,7 +67,12 @@ class EncounterRecord(Base):
         String(40), ForeignKey("patients.patient_id", ondelete="RESTRICT"),
         nullable=False, index=True
     )
-    facility_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    facility_id: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("facilities.facility_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     clinician_name: Mapped[str] = mapped_column(String(200), nullable=False)
     encounter_type: Mapped[str] = mapped_column(
         String(100), nullable=False, default="consultation", server_default="consultation"
@@ -262,7 +272,12 @@ class UserFacilityRoleRecord(Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
     )
-    facility_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    facility_id: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("facilities.facility_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     role: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
