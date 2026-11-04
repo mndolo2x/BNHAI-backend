@@ -1,5 +1,6 @@
 """Database models. Use synthetic data only during development."""
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -8,7 +9,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Float,
+    Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -288,6 +291,11 @@ class NotificationRecord(Base):
             "category IN ('workflow', 'laboratory', 'follow_up', 'administration', 'system')",
             name="ck_notifications_category",
         ),
+        Index(
+            "ix_notifications_recipient_created",
+            "recipient_user_id",
+            "created_at",
+        ),
     )
 
     notification_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -336,7 +344,7 @@ class ClaimDocumentRecord(Base):
     service_date: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
     patient_first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tariff_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(precision=12,scale=2), nullable=True)
     file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extraction_status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
@@ -373,7 +381,7 @@ class ClaimBatchRecord(Base):
     )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="prepared", index=True)
     document_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
     external_submission_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
     external_submission_channel: Mapped[str | None] = mapped_column(String(80), nullable=True)
     external_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
