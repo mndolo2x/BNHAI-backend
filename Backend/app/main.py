@@ -1,7 +1,16 @@
 """FastAPI entry point for the Botswana National Healthcare AI Platform."""
 from typing import Annotated
+import os
+
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 from fastapi import Depends, FastAPI, HTTPException
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -35,6 +44,61 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url=None,
 )
+# Shared rate limiter for API endpoints.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(
+    RateLimitExceeded,
+    _rate_limit_exceeded_handler,
+)
+
+# Only explicitly configured frontend origins may access the API.
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# Restrict accepted hostnames in production.
+app_env = os.getenv("APP_ENV", "development").strip().lower()
+
+allowed_hosts = [
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+
+if app_env in {"production", "prod"}:
+    if not allowed_hosts or "*" in allowed_hosts:
+        raise RuntimeError(
+            "Production requires explicit ALLOWED_HOSTS without wildcards."
+        )
+else:
+    allowed_hosts = allowed_hosts or [
+        "localhost",
+        "127.0.0.1",
+        "testserver",
+    ]
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=allowed_hosts,
+)
+
+# Redirect HTTP requests to HTTPS in production.
+# The deployment proxy must correctly communicate the original
+# request scheme through trusted proxy configuration.
+if app_env in {"production", "prod"}:
+    app.add_middleware(HTTPSRedirectMiddleware)
+
 
 app.include_router(auth_router, prefix="/api/v1")
 # All clinical/resource APIs require a valid token and an explicitly allowed role.

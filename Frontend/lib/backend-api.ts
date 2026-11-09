@@ -139,9 +139,14 @@ export async function apiRequest<T>(
     : await response.text().catch(() => '')
 
   if (!response.ok) {
-    throw new Error(responseMessage(payload, response.status))
+  if (response.status === 401 && token) {
+    throw new Error('BNHAI_SESSION_EXPIRED')
   }
-  return payload as T
+
+  throw new Error(responseMessage(payload, response.status))
+}
+
+return payload as T
 }
 
 export function calculateAge(dateOfBirth: string | null): number | null {
