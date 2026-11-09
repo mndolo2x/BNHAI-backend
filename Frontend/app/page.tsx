@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { apiRequest, calculateAge, formatDateTime, getInitials, type ApiCurrentUser, type ApiLoginResponse, type ApiPatient, type ApiPatientWorkspace, type ApiFollowUpTask } from '@/lib/backend-api'
 
 import {
@@ -83,6 +83,7 @@ export default function Page() {
   const [notice, setNotice] = useState('')
   const [mobileNav, setMobileNav] = useState(false)
   const [accessToken, setAccessToken] = useState<string | null>(null)
+  const sessionVersion = useRef(0)
   const [currentUser, setCurrentUser] = useState<ApiCurrentUser | null>(null)
   const [loginUsername, setLoginUsername] = useState('facility_admin_demo')
   const [loginPassword, setLoginPassword] = useState('')
@@ -109,33 +110,70 @@ export default function Page() {
 
 )
   const showNotice = (text: string) => { setNotice(text); window.setTimeout(() => setNotice(''), 2600) }
+  function handleSessionExpired(error: unknown, requestSession: number): boolean {
+  if (
+    error instanceof Error &&
+    error.message === 'BNHAI_SESSION_EXPIRED'
+  ) {
+    if (requestSession === sessionVersion.current) {
+      handleLogout()
+      setLoginError('Your session has expired. Please sign in again.')
+    }
+    return true
+  }
+
+  return false
+}
 
   const activeAssignment = currentUser?.assignments[0]
   const userInitials = currentUser ? getInitials(currentUser.display_name) : 'BN'
   const userRoleLabel = currentUser?.assignments.map(a => a.role.replace(/_/g, ' ')).join(' · ') || 'No role assigned'
 
   async function loadPatients(token: string) {
-    setPatientsLoading(true)
-    setPatientsError('')
-    try {
-      const records = await apiRequest<ApiPatient[]>('api/v1/patients', token)
-      setApiPatients(records.map(record => ({
-        id: record.patient_id,
-        name: record.display_name,
-        age: calculateAge(record.date_of_birth),
-        sex: 'Not recorded',
-        facility: record.facility_id,
-        last: 'Not available',
-        status: record.record_status === 'active' ? 'Active' : 'Inactive',
-        initials: getInitials(record.display_name),
-      })))
-    } catch (error) {
-      setPatientsError(error instanceof Error ? error.message : 'Unable to load patients.')
-    } finally {
+  const requestSession = sessionVersion.current
+
+  setPatientsLoading(true)
+  setPatientsError('')
+
+  try {
+    const records = await apiRequest<ApiPatient[]>(
+      'api/v1/patients',
+      token
+    )
+
+    if (requestSession !== sessionVersion.current) return
+
+    setApiPatients(records.map(record => ({
+      id: record.patient_id,
+      name: record.display_name,
+      age: calculateAge(record.date_of_birth),
+      sex: 'Not recorded',
+      facility: record.facility_id,
+      last: 'Not available',
+      status: record.record_status === 'active' ? 'Active' : 'Inactive',
+      initials: getInitials(record.display_name),
+    })))
+
+  } catch (error) {
+    if (requestSession !== sessionVersion.current) return
+
+    if (handleSessionExpired(error, requestSession)) return
+
+    setPatientsError(
+      error instanceof Error
+        ? error.message
+        : 'Unable to load patients.'
+    )
+
+  } finally {
+    if (requestSession === sessionVersion.current) {
       setPatientsLoading(false)
     }
   }
+}
   async function loadFollowUps(token: string) {
+  const requestSession = sessionVersion.current
+
   setFollowUpsLoading(true)
   setFollowUpsError('')
 
@@ -144,13 +182,24 @@ export default function Page() {
       'api/v1/follow-ups',
       token
     )
+
+    if (requestSession !== sessionVersion.current) return
+
     setApiFollowUps(records)
   } catch (error) {
-    setFollowUpsError(
-      error instanceof Error ? error.message : 'Unable to load follow-up tasks.'
+  if (requestSession !== sessionVersion.current) return
+
+  if (handleSessionExpired(error, requestSession)) return
+
+  setFollowUpsError(
+    error instanceof Error
+      ? error.message
+      : 'Unable to load follow-up tasks.'
     )
   } finally {
-    setFollowUpsLoading(false)
+    if (requestSession === sessionVersion.current) {
+      setFollowUpsLoading(false)
+    }
   }
 }
 async function updateFollowUpStatus(taskId: string, nextStatus: string) {
@@ -158,6 +207,8 @@ async function updateFollowUpStatus(taskId: string, nextStatus: string) {
     showNotice('Please sign in again.')
     return
   }
+
+  const requestSession = sessionVersion.current
 
   try {
     const updated = await apiRequest<ApiFollowUpTask>(
@@ -169,6 +220,8 @@ async function updateFollowUpStatus(taskId: string, nextStatus: string) {
       }
     )
 
+    if (requestSession !== sessionVersion.current) return
+
     setApiFollowUps(current =>
       current.map(task =>
         task.task_id === taskId ? updated : task
@@ -177,8 +230,14 @@ async function updateFollowUpStatus(taskId: string, nextStatus: string) {
 
     showNotice('Follow-up status saved successfully.')
   } catch (error) {
+    if (requestSession !== sessionVersion.current) return
+
+    if (handleSessionExpired(error, requestSession)) return
+
     showNotice(
-      error instanceof Error ? error.message : 'Unable to update follow-up.'
+      error instanceof Error
+        ? error.message
+        : 'Unable to update follow-up.'
     )
   }
 }
@@ -187,6 +246,8 @@ async function createFollowUpTask(description: string) {
     showNotice('Please sign in again.')
     return
   }
+
+  const requestSession = sessionVersion.current
 
   const selectedPatient =
     apiPatients.find(p => p.id === patient.id) ?? apiPatients[0]
@@ -207,21 +268,33 @@ async function createFollowUpTask(description: string) {
           description,
         }),
       }
-    )
+        )
+
+    if (requestSession !== sessionVersion.current) return
 
     setApiFollowUps(current => [created, ...current])
 
     showNotice('Follow-up task created successfully.')
   } catch (error) {
-    showNotice(
-      error instanceof Error ? error.message : 'Unable to create follow-up task.'
-    )
-  }
+  if (requestSession !== sessionVersion.current) return
+
+  if (handleSessionExpired(error, requestSession)) return
+
+  showNotice(
+    error instanceof Error
+      ? error.message
+      : 'Unable to create follow-up task.'
+  )
+}
 }
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setLoginBusy(true)
-    setLoginError('')
+  event.preventDefault()
+
+  sessionVersion.current += 1
+  const requestSession = sessionVersion.current
+
+  setLoginBusy(true)
+  setLoginError('')
     try {
       const login = await apiRequest<ApiLoginResponse>('api/v1/auth/login', undefined, {
         method: 'POST',
@@ -238,11 +311,17 @@ async function createFollowUpTask(description: string) {
         last: 'Not available',
         status: record.record_status === 'active' ? 'Active' : 'Inactive',
         initials: getInitials(record.display_name),
-      }))
+            }))
+
+      if (requestSession !== sessionVersion.current) return
+
       setAccessToken(login.access_token)
       setCurrentUser(user)
       setApiPatients(mappedPatients)
       await loadFollowUps(login.access_token)
+
+      if (requestSession !== sessionVersion.current) return
+
       setLoginPassword('')
       setPage('Patients')
       setWorkspaceOpen(false)
@@ -251,26 +330,52 @@ async function createFollowUpTask(description: string) {
       setNotice('Connected to the local FastAPI patient API')
       window.setTimeout(() => setNotice(''), 2600)
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Login failed. Check the backend server and your credentials.')
-    } finally {
-      setLoginBusy(false)
-    }
+  if (requestSession !== sessionVersion.current) return
+
+  setLoginError(
+    error instanceof Error
+      ? error.message
+      : 'Login failed. Check the backend server and your credentials.'
+  )
+} finally {
+  if (requestSession === sessionVersion.current) {
+    setLoginBusy(false)
+  }
+}
   }
 
 
   function handleLogout() {
-    setAccessToken(null)
-    setCurrentUser(null)
-    setApiPatients([])
-    setWorkspaceData(null)
-    setWorkspaceOpen(false)
-    setLoginPassword('')
-    setLoginError('')
-    setPage('Dashboard')
-    showNotice('Signed out. Your token was held only in page memory.')
-  }
+  sessionVersion.current += 1
+
+  setAccessToken(null)
+  setCurrentUser(null)
+  setApiPatients([])
+  setApiFollowUps([])
+  setWorkspaceData(null)
+  setWorkspaceOpen(false)
+  setWorkspaceLoading(false)
+  setWorkspaceError('')
+  setPatientsError('')
+  setFollowUpsError('')
+  setFollowUpsLoading(false)
+  setPatient(demoPatients[0])
+  setSelectedLab(null)
+  setNoteText('')
+  setNoteSaved(false)
+  setEncounterEditor(false)
+  setCopilotOpen(false)
+  setDraft(false)
+  setLoginPassword('')
+  setLoginError('')
+  setQuery('')
+  setPage('Dashboard')
+
+  showNotice('Signed out. Your session data has been cleared.')
+}
 
   async function openPatient(p: Patient) {
+    const requestSession = sessionVersion.current
     setPatient(p)
     setWorkspaceData(null)
     setWorkspaceError('')
@@ -284,14 +389,30 @@ async function createFollowUpTask(description: string) {
       return
     }
     try {
-      const workspace = await apiRequest<ApiPatientWorkspace>(`api/v1/patients/${encodeURIComponent(p.id)}/workspace`, accessToken)
-      setWorkspaceData(workspace)
+      const workspace = await apiRequest<ApiPatientWorkspace>(
+  `api/v1/patients/${encodeURIComponent(p.id)}/workspace`,
+  accessToken
+)
+
+if (requestSession !== sessionVersion.current) return
+
+setWorkspaceData(workspace)
     } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : 'Unable to load this patient workspace.')
-    } finally {
+  if (requestSession === sessionVersion.current) {
+    if (handleSessionExpired(error, requestSession)) return
+
+    setWorkspaceError(
+      error instanceof Error
+        ? error.message
+        : 'Unable to load this patient workspace.'
+    )
+  }
+} finally {
+    if (requestSession === sessionVersion.current) {
       setWorkspaceLoading(false)
     }
   }
+}
 
   function Dashboard() { return <>
     <PageHeader eyebrow="LOCAL DEVELOPMENT OVERVIEW" title={`Welcome, ${currentUser?.display_name || 'user'}`} subtitle="The patient directory and workspace use live local API data. Other dashboard metrics are still prototype examples." actions={<button className="button primary" onClick={() => setPage('Encounters')}><Plus /> Start encounter</button>} />
