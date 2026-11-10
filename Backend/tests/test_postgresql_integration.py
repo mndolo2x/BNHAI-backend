@@ -320,3 +320,183 @@ def test_postgresql_patient_workspace_read_persists_audit(pg_engine):
             connection.execute(
                 text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
             )
+
+
+def test_postgresql_restricted_runtime_patient_workspace_audit(pg_engine):
+    """Exercise the real API with an audit append-only PostgreSQL login."""
+    import re
+    from uuid import uuid4
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine, select, text
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.orm import sessionmaker
+
+    from app.auth.security import create_access_token, hash_password
+    from app.db import models as _models  # noqa: F401
+    from app.db.base import Base
+    from app.db.models import AuditEventRecord, UserFacilityRoleRecord, UserRecord
+    from app.db.seed import seed_demo_patients
+    from app.db.session import get_db
+    from app.main import app
+
+    runtime_raw = os.getenv("BNHAI_TEST_RUNTIME_DATABASE_URL")
+    if not runtime_raw:
+        pytest.skip("BNHAI_TEST_RUNTIME_DATABASE_URL is not configured")
+
+    runtime_url = make_url(runtime_raw)
+    if (
+        runtime_url.get_backend_name() != "postgresql"
+        or runtime_url.username != "bnhai_app_runtime"
+        or runtime_url.database != "bnhai_test"
+        or runtime_url.host not in ("127.0.0.1", "localhost")
+        or runtime_url.port != 5432
+        or not runtime_url.password
+    ):
+        pytest.fail("Unsafe restricted PostgreSQL test URL")
+
+    schema = f"bnhai_runtime_test_{uuid4().hex}"
+    actor_id = "TEST-PG-RUNTIME-CLINICIAN"
+    admin_engine = None
+    runtime_engine = None
+    original_overrides = app.dependency_overrides.copy()
+
+    with pg_engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+    try:
+        admin_engine = create_engine(
+            pg_engine.url,
+            pool_pre_ping=True,
+            connect_args={"options": f"-csearch_path={schema}"},
+        )
+        with admin_engine.connect() as connection:
+            assert connection.scalar(text("SELECT current_schema()")) == schema
+
+        Base.metadata.create_all(bind=admin_engine)
+        AdminSession = sessionmaker(
+            bind=admin_engine, autoflush=False, autocommit=False
+        )
+
+        with AdminSession() as db:
+            seed_demo_patients(db)
+            db.add(UserRecord(
+                user_id=actor_id,
+                username="test_pg_runtime_clinician",
+                display_name="Synthetic Runtime Clinician",
+                password_hash=hash_password("TestPassword123!"),
+                is_active=True,
+            ))
+            db.flush()
+            db.add(UserFacilityRoleRecord(
+                assignment_id="ASSIGNMENT-PG-RUNTIME-CLINICIAN",
+                user_id=actor_id,
+                facility_id="DEMO-FACILITY-001",
+                role="clinician",
+            ))
+            db.commit()
+
+        # Grant permissions only inside this disposable test schema.
+        with pg_engine.begin() as connection:
+            connection.execute(text(
+                f'GRANT USAGE ON SCHEMA "{schema}" TO bnhai_app_runtime'
+            ))
+            for table in Base.metadata.sorted_tables:
+                assert re.fullmatch(r"[a-z][a-z0-9_]*", table.name)
+                privileges = (
+                    "SELECT, INSERT" if table.name == "audit_events"
+                    else "SELECT, INSERT, UPDATE, DELETE"
+                )
+                connection.execute(text(
+                    f'GRANT {privileges} ON TABLE "{schema}"."{table.name}" '
+                    'TO bnhai_app_runtime'
+                ))
+
+        runtime_engine = create_engine(
+            runtime_url,
+            pool_pre_ping=True,
+            connect_args={
+                "options": f"-csearch_path={schema} -clock_timeout=1000ms"
+            },
+        )
+
+        with runtime_engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT current_user")
+            ) == "bnhai_app_runtime"
+            assert connection.scalar(
+                text("SELECT current_schema()")
+            ) == schema
+
+            for privilege in ("UPDATE", "DELETE", "TRUNCATE"):
+                assert connection.scalar(
+                    text(
+                        "SELECT has_table_privilege("
+                        "current_user, 'audit_events', :p)"
+                    ),
+                    {"p": privilege},
+                ) is False
+
+        RuntimeSession = sessionmaker(
+            bind=runtime_engine, autoflush=False, autocommit=False
+        )
+
+        def override_get_db():
+            with RuntimeSession() as db:
+                yield db
+
+        app.dependency_overrides[get_db] = override_get_db
+
+        with TestClient(app) as client:
+            headers = {
+                "Authorization": f"Bearer {create_access_token(actor_id)}"
+            }
+
+            allowed = client.get(
+                "/api/v1/patients/DEMO-0001/workspace",
+                headers=headers,
+            )
+            assert allowed.status_code == 200, allowed.text
+            assert allowed.json()["patient"]["patient_id"] == "DEMO-0001"
+
+            denied = client.get(
+                "/api/v1/patients/DEMO-0003/workspace",
+                headers=headers,
+            )
+            assert denied.status_code == 404, denied.text
+            assert "clinical_notes" not in denied.text
+
+        with RuntimeSession() as db:
+            events = db.scalars(
+                select(AuditEventRecord).where(
+                    AuditEventRecord.actor_id == actor_id,
+                    AuditEventRecord.action == "read",
+                    AuditEventRecord.resource_type == "patients",
+                )
+            ).all()
+
+            assert sorted(
+                (event.resource_id, event.outcome) for event in events
+            ) == [
+                ("DEMO-0001", "success"),
+                ("DEMO-0003", "denied"),
+            ]
+            assert all(
+                event.actor_source == "authenticated-user"
+                for event in events
+            )
+            assert all(event.occurred_at is not None for event in events)
+
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(original_overrides)
+
+        if runtime_engine is not None:
+            runtime_engine.dispose()
+        if admin_engine is not None:
+            admin_engine.dispose()
+
+        with pg_engine.begin() as connection:
+            connection.execute(
+                text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            )
