@@ -171,3 +171,23 @@ def test_dedicated_patient_can_access_verified_portal(
     )
 
     assert staff_response.status_code == 403
+
+
+def test_inactive_patient_is_excluded_from_portal_profile(client: TestClient) -> None:
+    """An inactive patient record must not grant portal access."""
+    from app.db.models import PatientRecord
+
+    add_patient_link("TEST-PORTAL-PATIENT", "DEMO-0001", "verified")
+
+    generator = app.dependency_overrides[get_db]()
+    db = next(generator)
+    try:
+        patient = db.get(PatientRecord, "DEMO-0001")
+        assert patient is not None
+        patient.record_status = "inactive"
+        db.commit()
+    finally:
+        generator.close()
+
+    response = portal_request(client, "TEST-PORTAL-PATIENT")
+    assert response.status_code == 403, response.text

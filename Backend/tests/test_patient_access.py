@@ -109,3 +109,34 @@ def test_no_patient_link_denied(client: TestClient) -> None:
 
     finally:
         generator.close()
+
+
+def test_inactive_patient_is_denied_even_with_verified_link(client: TestClient) -> None:
+    """Verified account links must not unlock inactive patient records."""
+    from app.db.models import PatientRecord
+
+    generator = app.dependency_overrides[get_db]()
+    db = next(generator)
+    try:
+        patient = db.get(PatientRecord, "DEMO-0001")
+        assert patient is not None
+        patient.record_status = "inactive"
+
+        db.add(
+            PatientAccountLinkRecord(
+                link_id=str(uuid4()),
+                user_id="TEST-CLINICIAN",
+                patient_id="DEMO-0001",
+                verification_status="verified",
+            )
+        )
+        db.commit()
+
+        with pytest.raises(HTTPException) as error:
+            get_verified_patient_for_user(
+                "DEMO-0001", db, make_test_user()
+            )
+
+        assert error.value.status_code == 404
+    finally:
+        generator.close()

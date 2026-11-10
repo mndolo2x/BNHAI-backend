@@ -27,6 +27,7 @@ def get_verified_patient_for_user(
             PatientAccountLinkRecord.user_id == user.user_id,
             PatientAccountLinkRecord.patient_id == patient_id,
             PatientAccountLinkRecord.verification_status == "verified",
+            PatientRecord.record_status == "active",
         )
     )
 

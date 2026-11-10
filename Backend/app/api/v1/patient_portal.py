@@ -42,6 +42,7 @@ def read_patient_portal_profile(
         .where(
             PatientAccountLinkRecord.user_id == user.user_id,
             PatientAccountLinkRecord.verification_status == "verified",
+            PatientRecord.record_status == "active",
         )
         .order_by(PatientRecord.patient_id)
     )
