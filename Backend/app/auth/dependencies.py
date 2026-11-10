@@ -1,15 +1,17 @@
 """Request authentication and endpoint-level role authorization."""
 from dataclasses import dataclass
+from uuid import uuid4
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import InvalidTokenError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth.security import decode_access_token
-from app.db.models import UserFacilityRoleRecord, UserRecord
+from app.db.models import AuditEventRecord, UserFacilityRoleRecord, UserRecord
 from app.db.session import get_db
 
 bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
@@ -249,6 +251,36 @@ def authorize_api_request(
             detail="No authorization policy is defined for this operation.",
         )
     if not (current_user.role_names & required):
+        # Audit role-denied clinical workspace requests.
+        matched_route = request.scope.get("route")
+
+        if (
+            request.method == "GET"
+            and getattr(matched_route, "path", None)
+            == "/api/v1/patients/{patient_id}/workspace"
+        ):
+            patient_id = request.path_params["patient_id"]
+
+            try:
+                with Session(bind=db.get_bind()) as audit_db:
+                    audit_db.add(
+                        AuditEventRecord(
+                            event_id=str(uuid4()),
+                            actor_id=current_user.user_id,
+                            actor_source="authenticated-user",
+                            action="read",
+                            resource_type="patients",
+                            resource_id=patient_id,
+                            outcome="denied",
+                        )
+                    )
+                    audit_db.commit()
+            except SQLAlchemyError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Patient workspace temporarily unavailable.",
+                ) from error
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your assigned role does not permit this operation.",

@@ -116,3 +116,129 @@ def test_cross_facility_and_unknown_workspace_denials_are_audited(client: TestCl
             assert events[0].occurred_at is not None
     finally:
         generator.close()
+
+
+def test_role_denied_workspace_access_is_audited(client: TestClient) -> None:
+    """API-level clinical-role denial leaves a metadata-only audit record."""
+    actor_id = "TEST-RECEPTIONIST"
+    patient_id = "DEMO-0001"
+    headers = {"Authorization": f"Bearer {create_access_token(actor_id)}"}
+
+    response = client.get(
+        f"/api/v1/patients/{patient_id}/workspace",
+        headers=headers,
+    )
+    assert response.status_code == 403, response.text
+    assert "clinical_notes" not in response.text
+
+    generator = client.app.dependency_overrides[get_db]()
+    db = next(generator)
+    try:
+        events = db.scalars(
+            select(AuditEventRecord).where(
+                AuditEventRecord.actor_id == actor_id,
+                AuditEventRecord.actor_source == "authenticated-user",
+                AuditEventRecord.action == "read",
+                AuditEventRecord.resource_type == "patients",
+                AuditEventRecord.resource_id == patient_id,
+                AuditEventRecord.outcome == "denied",
+            )
+        ).all()
+
+        assert len(events) == 1, (
+            f"Expected one API-level denial audit event, got {len(events)}"
+        )
+        assert events[0].occurred_at is not None
+    finally:
+        generator.close()
+
+
+def test_role_denial_fails_closed_when_audit_storage_fails(
+    client: TestClient, monkeypatch
+) -> None:
+    """Role-based denial stays private when audit storage is unavailable."""
+    from sqlalchemy.exc import OperationalError
+    from app.auth import dependencies as auth_dependencies
+
+    base_session = auth_dependencies.Session
+
+    class BrokenAuditSession(base_session):
+        def commit(self) -> None:
+            raise OperationalError(
+                "simulated audit write",
+                {},
+                RuntimeError("simulated storage outage"),
+            )
+
+    monkeypatch.setattr(
+        auth_dependencies,
+        "Session",
+        BrokenAuditSession,
+    )
+
+    headers = {
+        "Authorization": (
+            f"Bearer {create_access_token('TEST-RECEPTIONIST')}"
+        )
+    }
+
+    response = client.get(
+        "/api/v1/patients/DEMO-0001/workspace",
+        headers=headers,
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json() == {
+        "detail": "Patient workspace temporarily unavailable."
+    }
+    assert "DEMO-0001" not in response.text
+    assert "clinical_notes" not in response.text
+
+
+def test_workspace_read_fails_closed_during_sqlite_write_lock(
+    client: TestClient,
+) -> None:
+    """A competing writer must not cause an unaudited workspace response."""
+    import sqlite3
+    from sqlalchemy import event
+
+    generator = client.app.dependency_overrides[get_db]()
+    db = next(generator)
+
+    try:
+        engine = db.get_bind()
+        database = engine.url.database
+        assert database and database != ":memory:"
+    finally:
+        generator.close()
+
+    @event.listens_for(engine, "checkout")
+    def short_test_timeout(connection, _record, _proxy):
+        connection.execute("PRAGMA busy_timeout=200")
+
+    blocker = sqlite3.connect(database, timeout=1)
+
+    try:
+        # Hold a write reservation using another database connection.
+        blocker.execute("BEGIN IMMEDIATE")
+
+        response = client.get(
+            "/api/v1/patients/DEMO-0001/workspace",
+            headers={
+                "Authorization": (
+                    f"Bearer {create_access_token('TEST-CLINICIAN')}"
+                )
+            },
+        )
+
+        assert response.status_code == 503, response.text
+        assert response.json() == {
+            "detail": "Patient workspace temporarily unavailable."
+        }
+        assert "DEMO-0001" not in response.text
+        assert "clinical_notes" not in response.text
+
+    finally:
+        blocker.rollback()
+        blocker.close()
+        event.remove(engine, "checkout", short_test_timeout)
