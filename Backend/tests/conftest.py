@@ -74,6 +74,18 @@ def client(tmp_path) -> Iterator[TestClient]:
                     role=role,
                 )
             )
+
+        # Dedicated synthetic patient account.
+        # No staff facility-role assignment is created.
+        db.add(
+            UserRecord(
+                user_id="TEST-PORTAL-PATIENT",
+                username="test_portal_patient",
+                display_name="Test Portal Patient",
+                password_hash=TEST_PASSWORD_HASH,
+                is_active=True,
+            )
+        )
         db.commit()
 
     try:

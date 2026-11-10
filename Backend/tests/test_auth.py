@@ -126,3 +126,92 @@ def test_unknown_api_policy_is_denied(client: TestClient) -> None:
     from app.auth.dependencies import required_roles_for_request
 
     assert required_roles_for_request("GET", "/api/v1/unknown-resource") is None
+
+
+def test_revoked_facility_admin_role_takes_effect_immediately(client: TestClient) -> None:
+    """An existing token must not retain permissions after role removal."""
+    from app.db.models import UserFacilityRoleRecord
+    from app.db.session import get_db
+
+    headers = auth_header("TEST-FACILITY-ADMIN")
+
+    before = client.get("/api/v1/patients", headers=headers)
+    assert before.status_code == 200, before.text
+
+    override = client.app.dependency_overrides[get_db]
+    generator = override()
+    db = next(generator)
+
+    try:
+        assignment = db.get(
+            UserFacilityRoleRecord,
+            "ASSIGNMENT-TEST-FACILITY-ADMIN",
+        )
+        assert assignment is not None
+        assert assignment.role == "facility_admin"
+
+        db.delete(assignment)
+        db.commit()
+    finally:
+        try:
+            next(generator)
+        except StopIteration:
+            pass
+
+    profile = client.get("/api/v1/auth/me", headers=headers)
+    assert profile.status_code == 200, profile.text
+    assert profile.json()["assignments"] == []
+
+    after = client.get("/api/v1/patients", headers=headers)
+    assert after.status_code == 403, after.text
+
+
+def test_expired_access_token_is_rejected(client: TestClient) -> None:
+    """Expired access tokens must not authenticate users."""
+    from datetime import datetime, timedelta, timezone
+    import jwt
+    from app.auth.security import JWT_SECRET_KEY, ALGORITHM
+
+    now = datetime.now(timezone.utc)
+
+    token = jwt.encode(
+        {
+            "sub": "TEST-CLINICIAN",
+            "iat": now - timedelta(hours=2),
+            "exp": now - timedelta(hours=1),
+            "type": "access",
+        },
+        JWT_SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401, response.text
+
+
+def test_missing_expiration_claim_is_rejected(client: TestClient) -> None:
+    """Tokens without the required expiration claim must be rejected."""
+    from datetime import datetime, timezone
+    import jwt
+    from app.auth.security import JWT_SECRET_KEY, ALGORITHM
+
+    token = jwt.encode(
+        {
+            "sub": "TEST-CLINICIAN",
+            "iat": datetime.now(timezone.utc),
+            "type": "access",
+        },
+        JWT_SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401, response.text

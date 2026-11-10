@@ -78,8 +78,14 @@ PATIENT_READ = {
     "receptionist", "nurse", "clinician", "laboratory_worker",
     "follow_up_worker", "facility_admin", "auditor", "platform_admin",
 }
+
 PATIENT_WRITE = {"receptionist", "facility_admin", "platform_admin"}
+
+PATIENT_IDENTITY_VERIFY = {"receptionist", "facility_admin"}
+PATIENT_IDENTITY_APPROVE = {"facility_admin"}
+
 CLINICAL_READ = {"clinician", "nurse", "facility_admin", "auditor", "platform_admin"}
+
 ENCOUNTER_WRITE = {"clinician", "nurse", "platform_admin"}
 NOTE_WRITE = {"clinician", "platform_admin"}
 LAB_READ = {
@@ -112,6 +118,21 @@ def required_roles_for_request(method: str, path: str) -> set[str] | None:
     """
     path = path.rstrip("/") or "/"
     method = method.upper()
+
+    # Patient enrollment and identity verification API permissions.
+    if path == "/api/v1/patient-links" and method == "POST":
+        return PATIENT_WRITE
+
+    if path.startswith("/api/v1/patient-links/") and method == "POST":
+        parts = path.split("/")
+
+        if len(parts) == 6 and parts[4]:
+            if parts[5] == "verify-identity":
+                return PATIENT_IDENTITY_VERIFY
+
+            if parts[5] == "approve":
+                return PATIENT_IDENTITY_APPROVE
+
 
     if path == "/api/v1/dashboard/summary" and method == "GET":
         return DASHBOARD_READ

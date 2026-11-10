@@ -405,3 +405,131 @@ class ClaimBatchRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
+
+
+class PatientAccountLinkRecord(Base):
+    """Verified relationship between a portal account and a facility patient record."""
+
+    __tablename__ = "patient_account_links"
+    __table_args__ = (
+        CheckConstraint(
+            "verification_status IN ('pending', 'verified', 'revoked')",
+            name="ck_patient_account_links_verification_status",
+        ),
+        UniqueConstraint(
+            "user_id",
+            "patient_id",
+            name="uq_patient_account_links_user_patient",
+        ),
+    )
+
+    link_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+
+    patient_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey("patients.patient_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    # NEW FIELD: Records who initiated the patient enrollment.
+    created_by: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    verification_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+
+
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    verified_by: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+
+
+
+class PatientIdentityVerificationRecord(Base):
+    """Metadata documenting a patient-account identity check."""
+
+    __tablename__ = "patient_identity_verifications"
+
+    __table_args__ = (
+        CheckConstraint(
+            "verification_method IN "
+            "('in_person_document_check', "
+            "'approved_remote_verification')",
+            name="ck_patient_identity_verification_method",
+        ),
+        UniqueConstraint(
+            "link_id",
+            name="uq_patient_identity_verification_link",
+        ),
+    )
+
+    verification_id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+    )
+
+    link_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(
+            "patient_account_links.link_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    verification_method: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+    )
+
+    verified_by: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    verification_reference: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )

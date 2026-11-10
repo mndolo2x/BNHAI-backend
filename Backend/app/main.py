@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import authorize_api_request
 from app.auth.router import router as auth_router
+from app.api.v1.patient_portal import router as patient_portal_router
+from app.api.v1.patient_links import router as patient_links_router
 from app.api.v1.patients import router as patients_router
 from app.api.v1.patient_workspace import router as patient_workspace_router
 from app.api.v1.encounters import router as encounters_router
@@ -37,8 +39,14 @@ app = FastAPI(
 )
 
 app.include_router(auth_router, prefix="/api/v1")
-# All clinical/resource APIs require a valid token and an explicitly allowed role.
+app.include_router(patient_portal_router, prefix="/api/v1")
+
 protected_dependencies = [Depends(authorize_api_request)]
+app.include_router(
+    patient_links_router,
+    prefix="/api/v1",
+    dependencies=protected_dependencies,
+)
 app.include_router(patients_router, prefix="/api/v1", dependencies=protected_dependencies)
 app.include_router(patient_workspace_router, prefix="/api/v1", dependencies=protected_dependencies)
 app.include_router(encounters_router, prefix="/api/v1", dependencies=protected_dependencies)
