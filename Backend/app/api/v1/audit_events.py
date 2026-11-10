@@ -31,7 +31,9 @@ CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
     response_model=list[AuditEvent],
     summary="List development audit events in assigned facilities",
     description=(
-        "Lists successful database mutations for synthetic development records in the user's assigned facilities. "
+        "Lists database mutations and patient-workspace access events for synthetic records at assigned facilities. "
+        "Read events may represent successful access or denied attempts. "
+        "Events that cannot be linked to an existing resource at an assigned facility are hidden. "
         "Access requires an authenticated auditor, facility administrator, or platform administrator. "
         "This is not a production security audit system and must not be used with real patient data."
     ),
@@ -39,7 +41,7 @@ CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
 def list_audit_events(
     db: DbSession,
     user: CurrentUser,
-    action: Literal["created", "updated", "deleted"] | None = Query(default=None),
+    action: Literal["created", "updated", "deleted", "read"] | None = Query(default=None),
     resource_type: str | None = Query(default=None, min_length=1, max_length=80),
     resource_id: str | None = Query(default=None, min_length=1, max_length=200),
     limit: int = Query(default=50, ge=1, le=100),

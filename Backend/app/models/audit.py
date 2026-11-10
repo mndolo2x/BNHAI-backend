@@ -11,8 +11,8 @@ class AuditEvent(BaseModel):
     event_id: str
     actor_id: str
     actor_source: str
-    action: Literal["created", "updated", "deleted"]
+    action: Literal["created", "updated", "deleted", "read"]
     resource_type: str
     resource_id: str | None
-    outcome: Literal["success"]
+    outcome: Literal["success", "denied"]
     occurred_at: datetime
