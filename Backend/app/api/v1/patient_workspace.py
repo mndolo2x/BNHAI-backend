@@ -1,14 +1,17 @@
 """Read-only patient workspace aggregate, scoped to one assigned facility."""
 
 from typing import Annotated
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import CLINICAL_READ, AuthenticatedUser, get_current_user
 from app.auth.facility_scope import get_patient_in_scope
 from app.db.models import (
+    AuditEventRecord,
     ClinicalNoteRecord,
     EncounterRecord,
     FollowUpTaskRecord,
@@ -38,7 +41,35 @@ def get_patient_workspace(
     user: CurrentUser,
 ) -> dict[str, object]:
     """Build a consolidated workspace without crossing facility boundaries."""
-    patient = get_patient_in_scope(patient_id, db, user, CLINICAL_READ)
+    try:
+        patient = get_patient_in_scope(patient_id, db, user, CLINICAL_READ)
+    except HTTPException as denial:
+        if denial.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+
+        # Record the denied attempt without exposing clinical information.
+        try:
+            with Session(bind=db.get_bind()) as audit_db:
+                audit_db.add(
+                    AuditEventRecord(
+                        event_id=str(uuid4()),
+                        actor_id=user.user_id,
+                        actor_source="authenticated-user",
+                        action="read",
+                        resource_type="patients",
+                        resource_id=patient_id,
+                        outcome="denied",
+                    )
+                )
+                audit_db.commit()
+        except SQLAlchemyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Patient workspace temporarily unavailable.",
+            ) from error
+
+        # Preserve the original privacy-protecting 404 response.
+        raise
 
     # Only encounters tied to both this patient and their facility are included.
     encounters = list(
@@ -93,6 +124,28 @@ def get_patient_workspace(
         if (task.encounter_id is None or task.encounter_id in encounter_ids)
         and (task.report_id is None or task.report_id in report_ids)
     ]
+
+    # Record sensitive workspace access in a separate transaction.
+    # Never include clinical content or authentication tokens.
+    try:
+        with Session(bind=db.get_bind()) as audit_db:
+            audit_db.add(
+                AuditEventRecord(
+                    event_id=str(uuid4()),
+                    actor_id=user.user_id,
+                    actor_source="authenticated-user",
+                    action="read",
+                    resource_type="patients",
+                    resource_id=patient.patient_id,
+                    outcome="success",
+                )
+            )
+            audit_db.commit()
+    except SQLAlchemyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Patient workspace temporarily unavailable.",
+        ) from error
 
     return {
         "patient": patient,
