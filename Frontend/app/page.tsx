@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { AddPatientForm } from '@/components/add-patient-form'
+import { EncounterDirectory } from '@/components/encounter-directory'
 import { apiRequest, calculateAge, formatDateTime, getInitials, type ApiCurrentUser, type ApiLoginResponse, type ApiPatient, type ApiPatientWorkspace, type ApiFollowUpTask } from '@/lib/backend-api'
 
 import {
@@ -570,7 +571,34 @@ function FollowUps() {
 
 
 
-  function Encounters() { return <><PageHeader eyebrow="WORKSPACE / ENCOUNTERS" title="Clinical encounters" subtitle="Open, resume and review structured clinical documentation." actions={<button className="button primary" onClick={() => showNotice('New encounter started')}><Plus /> Start encounter</button>} /><div className="encounter-feature"><div><p className="eyebrow">ACTIVE ENCOUNTER</p><h2>Naledi Molefe <code>ENC-24891</code></h2><p>Outpatient consultation · Princess Marina Hospital · 18 Oct 2026, 08:42</p><Status>Draft in progress</Status></div><button className="button primary" onClick={() => { setPatient(demoPatients[0]); setDraft(false); setCopilotOpen(true); showNotice('Encounter editor opened') }}>Open encounter <ArrowRight /></button></div><section className="panel"><div className="panel-head"><div><p className="eyebrow">RECENT ENCOUNTERS</p><h2>All encounters</h2></div><div className="searchbox compact"><Search /><input placeholder="Search encounters" /></div></div><DataTable headers={['Encounter ID', 'Patient', 'Date and time', 'Clinician', 'Facility', 'Status', '']} rows={demoPatients.slice(0,4).map((p,i) => [<code key="id">ENC-2489{i}</code>, p.name, `${18-i} Oct 2026 · 0${8+i}:42`, 'Dr. K. Moagi', p.facility, <Status key="s">{i === 0 ? 'Draft' : 'Completed'}</Status>, <button className="icon-button" key="a" onClick={() => openPatient(p)}><ArrowRight /></button>])} /></section></> }
+  function Encounters() {
+    if (!accessToken) {
+      return (
+        <section className="panel" role="alert">
+          Sign in again to view encounters.
+        </section>
+      )
+    }
+
+    return (
+      <EncounterDirectory
+        token={accessToken}
+        patients={apiPatients.map(p => ({
+          id: p.id,
+          name: p.name,
+          facility: p.facility,
+          status: p.status,
+        }))}
+        writableFacilities={Array.from(new Set(
+          (currentUser?.assignments ?? [])
+            .filter(assignment =>
+              ['clinician', 'nurse', 'platform_admin'].includes(assignment.role)
+            )
+            .map(assignment => assignment.facility_id)
+        ))}
+      />
+    )
+  }
   function SimplePage({ title, eyebrow, icon: Icon, description }: { title: PageKey; eyebrow: string; icon: typeof Activity; description: string }) { return <><PageHeader eyebrow={eyebrow} title={title} subtitle={description} /><div className="empty-state"><Icon /><h2>{title} workspace</h2><p>This prototype area is ready for connection to the FastAPI service layer. Administrative actions are simulated and do not enforce real access control.</p><button className="button secondary" onClick={() => showNotice('Prototype action completed')}>Simulate action <ArrowRight /></button></div></> }
   function PageHeader({ eyebrow, title, subtitle, actions }: { eyebrow: string; title: string; subtitle: string; actions?: React.ReactNode }) { return <header className="page-header"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{subtitle}</p></div>{actions}</header> }
   function DataTable({ headers, rows, empty }: { headers: string[]; rows: (React.ReactNode[])[]; empty?: string }) { return <div className="table-wrap"><table><thead><tr>{headers.map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row,i) => <tr key={i}>{row.map((cell,j) => <td key={j}>{cell}</td>)}</tr>) : <tr><td className="table-empty" colSpan={headers.length}>{empty || 'No records found.'}</td></tr>}</tbody></table></div> }
