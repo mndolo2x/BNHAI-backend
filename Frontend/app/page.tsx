@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { AddPatientForm } from '@/components/add-patient-form'
 import { apiRequest, calculateAge, formatDateTime, getInitials, type ApiCurrentUser, type ApiLoginResponse, type ApiPatient, type ApiPatientWorkspace, type ApiFollowUpTask } from '@/lib/backend-api'
 
 import {
@@ -96,6 +97,7 @@ export default function Page() {
   const [workspaceData, setWorkspaceData] = useState<ApiPatientWorkspace | null>(null)
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
+  const [patientCreateOpen, setPatientCreateOpen] = useState(false)
 
   const filteredPatients = useMemo(() => apiPatients.filter(p =>
     `${p.id} ${p.name}`.toLowerCase().includes(query.toLowerCase()) &&
@@ -111,6 +113,14 @@ export default function Page() {
   const showNotice = (text: string) => { setNotice(text); window.setTimeout(() => setNotice(''), 2600) }
 
   const activeAssignment = currentUser?.assignments[0]
+  const patientWriteFacilities = Array.from(new Set(
+    (currentUser?.assignments ?? [])
+      .filter(item =>
+        ['receptionist', 'facility_admin', 'platform_admin']
+          .includes(item.role)
+      )
+      .map(item => item.facility_id)
+  ))
   const userInitials = currentUser ? getInitials(currentUser.display_name) : 'BN'
   const userRoleLabel = currentUser?.assignments.map(a => a.role.replace(/_/g, ' ')).join(' · ') || 'No role assigned'
 
@@ -308,7 +318,7 @@ async function createFollowUpTask(description: string) {
   function Patients() {
     const facilityOptions = Array.from(new Set(apiPatients.map(p => p.facility))).sort()
     return <>
-      <PageHeader eyebrow="WORKSPACE / PATIENTS · LIVE API" title="Patient directory" subtitle="Records below are loaded from your local FastAPI backend and are limited by your assigned facility." actions={<><button className="button secondary" onClick={() => accessToken && loadPatients(accessToken)} disabled={patientsLoading}><RefreshCw /> Refresh</button><button className="button primary" onClick={() => showNotice('Patient creation is not connected in this milestone. No record was created.')}><Plus /> Add patient</button></>} />
+      <PageHeader eyebrow="WORKSPACE / PATIENTS · LIVE API" title="Patient directory" subtitle="Records below are loaded from your local FastAPI backend and are limited by your assigned facility." actions={<><button className="button secondary" onClick={() => accessToken && loadPatients(accessToken)} disabled={patientsLoading}><RefreshCw /> Refresh</button><button className="button primary" onClick={() => setPatientCreateOpen(true)} disabled={!patientWriteFacilities.length}><Plus /> Add patient</button></>} />
       <div className="toolbar"><div className="searchbox"><Search /><input placeholder="Search patient name or ID" value={query} onChange={e => setQuery(e.target.value)} /></div><select value={facilityFilter} onChange={e => setFacilityFilter(e.target.value)} aria-label="Facility filter"><option>All facilities</option>{facilityOptions.map(facility => <option key={facility}>{facility}</option>)}</select><select value={patientStatusFilter} onChange={e => setPatientStatusFilter(e.target.value)} aria-label="Status filter"><option>All statuses</option><option>Active</option><option>Inactive</option></select><button className="button secondary" onClick={() => { setQuery(''); setFacilityFilter('All facilities'); setPatientStatusFilter('All statuses') }}><X /> Clear</button></div>
       {patientsLoading ? <section className="panel" role="status">Loading patient records from the local API…</section> : patientsError ? <section className="panel" role="alert"><div className="panel-head"><div><p className="eyebrow">PATIENT API ERROR</p><h2>Could not load patient records</h2></div><AlertCircle /></div><p className="ai-copy">{patientsError}</p><button className="button primary" onClick={() => accessToken && loadPatients(accessToken)}><RefreshCw /> Try again</button></section> : <DataTable headers={['Patient ID', 'Patient', 'Demographics', 'Facility ID', 'Last encounter', 'Record status', '']} rows={filteredPatients.map(p => [<code key="id">{p.id}</code>, <button key="name" className="table-link" onClick={() => void openPatient(p)}><span className="avatar">{p.initials}</span>{p.name}</button>, `${p.age === null ? 'Age not recorded' : `${p.age} years`} · ${p.sex}`, p.facility, p.last, <Status key="status">{p.status}</Status>, <button className="icon-button" aria-label={`Open ${p.name}`} onClick={() => void openPatient(p)}><ArrowRight /></button>])} empty="No patients match your search or filters." />}
       <p className="api-footnote">Connected data: patient ID, display name, date of birth when available, record status and facility ID. The current patient-directory API does not provide sex or last-encounter date.</p>
@@ -571,5 +581,25 @@ function FollowUps() {
     return <main className="auth-screen"><form className="auth-card" onSubmit={handleLogin}><div className="brand auth-brand"><div className="brand-mark">BN</div><div><strong>BNH<span>AI</span></strong><small>National Healthcare AI</small></div></div><p className="eyebrow">LOCAL DEVELOPMENT · SYNTHETIC DATA ONLY</p><h1>Sign in to BNH AI</h1><p className="auth-description">Use one of the demo accounts created by the backend seed command. The patient directory is loaded only after authentication succeeds.</p><label htmlFor="login-username">Username</label><input id="login-username" className="auth-input" value={loginUsername} onChange={event => setLoginUsername(event.target.value)} autoComplete="username" required /><label htmlFor="login-password">Password</label><input id="login-password" className="auth-input" type="password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} autoComplete="current-password" required /><button className="button primary full auth-submit" type="submit" disabled={loginBusy}>{loginBusy ? 'Connecting…' : 'Sign in and connect'}</button>{loginError && <p className="auth-error" role="alert">{loginError}</p>}<p className="auth-footnote">Passwords are not stored in the browser. The short-lived access token stays in page memory and is cleared when you sign out or refresh the page. Never use real patient data in this prototype.</p></form></main>
   }
 
-  return <div className="app-shell"><aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`} ><div className="brand"><div className="brand-mark">BN</div><div><strong>BNH<span>AI</span></strong><small>National Healthcare AI</small></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)}><X /></button></div><div className="facility"><small>ACTIVE FACILITY</small><strong>{activeAssignment?.facility_id || 'No facility assigned'}</strong><ChevronDown /></div><nav>{navGroups.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(item => { const label = item[0]; const Icon = item[1]; return <button key={label} className={page === label ? 'active' : ''} onClick={() => { setPage(label as PageKey); if (label === 'Patients') setWorkspaceOpen(false); setMobileNav(false) }}><Icon />{label}{label === 'Notifications' && <span className="nav-count">3</span>}</button> })}</div>)}</nav><div className="sidebar-footer"><div className="connection"><Wifi /><span><strong>Patient API connected</strong><small>Other screens remain prototype-only</small></span></div><button className="user-small" onClick={handleLogout} title="Sign out"><span className="avatar">{userInitials}</span><span><strong>{currentUser.display_name}</strong><small>{userRoleLabel} · Sign out</small></span><MoreHorizontal /></button></div></aside><main className="main"><header className="topbar"><button className="icon-button menu-trigger" onClick={() => setMobileNav(true)}><Menu /></button><div className="topbar-title"><strong>Botswana National Healthcare AI Platform</strong><span>LOCAL API CONNECTED · SYNTHETIC DATA ONLY · NO NATIONAL SYSTEM LINK</span></div><div className="topbar-actions"><div className="global-search"><Search /><input placeholder="Search records" onChange={e => { setQuery(e.target.value); if (e.target.value) setPage('Patients') }} /></div><button className="icon-button notification" aria-label="Notifications" onClick={() => setPage('Notifications')}><Bell /><span>3</span></button><button className="top-user" onClick={handleLogout} title="Sign out"><span className="avatar">{userInitials}</span><span><strong>{currentUser.display_name}</strong><small>{userRoleLabel} · Sign out</small></span><ChevronDown /></button></div></header><div className="content">{content}</div></main>{notice && <div className="toast"><Check /> {notice}</div>}</div>
+  return <div className="app-shell"><aside className={`sidebar ${mobileNav ? 'mobile-open' : ''}`} ><div className="brand"><div className="brand-mark">BN</div><div><strong>BNH<span>AI</span></strong><small>National Healthcare AI</small></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)}><X /></button></div><div className="facility"><small>ACTIVE FACILITY</small><strong>{activeAssignment?.facility_id || 'No facility assigned'}</strong><ChevronDown /></div><nav>{navGroups.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(item => { const label = item[0]; const Icon = item[1]; return <button key={label} className={page === label ? 'active' : ''} onClick={() => { setPage(label as PageKey); if (label === 'Patients') setWorkspaceOpen(false); setMobileNav(false) }}><Icon />{label}{label === 'Notifications' && <span className="nav-count">3</span>}</button> })}</div>)}</nav><div className="sidebar-footer"><div className="connection"><Wifi /><span><strong>Patient API connected</strong><small>Other screens remain prototype-only</small></span></div><button className="user-small" onClick={handleLogout} title="Sign out"><span className="avatar">{userInitials}</span><span><strong>{currentUser.display_name}</strong><small>{userRoleLabel} · Sign out</small></span><MoreHorizontal /></button></div></aside><main className="main"><header className="topbar"><button className="icon-button menu-trigger" onClick={() => setMobileNav(true)}><Menu /></button><div className="topbar-title"><strong>Botswana National Healthcare AI Platform</strong><span>LOCAL API CONNECTED · SYNTHETIC DATA ONLY · NO NATIONAL SYSTEM LINK</span></div><div className="topbar-actions"><div className="global-search"><Search /><input placeholder="Search records" onChange={e => { setQuery(e.target.value); if (e.target.value) setPage('Patients') }} /></div><button className="icon-button notification" aria-label="Notifications" onClick={() => setPage('Notifications')}><Bell /><span>3</span></button><button className="top-user" onClick={handleLogout} title="Sign out"><span className="avatar">{userInitials}</span><span><strong>{currentUser.display_name}</strong><small>{userRoleLabel} · Sign out</small></span><ChevronDown /></button></div></header><div className="content">
+        {page === 'Patients' &&
+          !workspaceOpen &&
+          patientCreateOpen &&
+          accessToken && (
+            <AddPatientForm
+              token={accessToken}
+              facilities={patientWriteFacilities}
+              onCancel={() => setPatientCreateOpen(false)}
+              onCreated={async () => {
+                setPatientCreateOpen(false)
+                setQuery('')
+                setFacilityFilter('All facilities')
+                setPatientStatusFilter('All statuses')
+                await loadPatients(accessToken)
+                showNotice('Synthetic patient saved to the local database.')
+              }}
+            />
+          )}
+        {content}
+      </div></main>{notice && <div className="toast"><Check /> {notice}</div>}</div>
 }

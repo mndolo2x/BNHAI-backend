@@ -7,7 +7,7 @@ type RouteContext = { params: Promise<{ path: string[] }> }
 function isAllowedRoute(path: string, method: string): boolean {
   if (path === 'api/v1/auth/login') return method === 'POST'
   if (path === 'api/v1/auth/me') return method === 'GET'
-  if (path === 'api/v1/patients') return method === 'GET'
+  if (path === 'api/v1/patients') return method === 'GET' || method === 'POST'
 
   if (/^api\/v1\/patients\/[A-Za-z0-9_-]+$/.test(path)) return method === 'GET'
   if (/^api\/v1\/patients\/[A-Za-z0-9_-]+\/workspace$/.test(path)) return method === 'GET'
