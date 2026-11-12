@@ -9,12 +9,18 @@ function isAllowedRoute(path: string, method: string): boolean {
   if (path === 'api/v1/auth/me') return method === 'GET'
   if (path === 'api/v1/patients') return method === 'GET' || method === 'POST'
   if (path === 'api/v1/encounters') return method === 'GET' || method === 'POST'
+  if (/^api\/v1\/encounters\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(path)) return method === 'GET'
+  if (/^api\/v1\/encounters\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/notes$/.test(path)) return method === 'GET' || method === 'POST'
 
   if (/^api\/v1\/patients\/[A-Za-z0-9_-]+$/.test(path)) return method === 'GET'
   if (/^api\/v1\/patients\/[A-Za-z0-9_-]+\/workspace$/.test(path)) return method === 'GET'
 
   if (path === 'api/v1/follow-ups') return method === 'GET' || method === 'POST'
   if (/^api\/v1\/follow-ups\/[A-Za-z0-9_-]+$/.test(path)) return method === 'GET' || method === 'PATCH'
+
+  if (/^api\/v1\/notes\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(path)) return method === 'PATCH'
+
+  if (/^api\/v1\/notes\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/submit-for-review$/.test(path)) return method === 'POST'
 
   return false
 }

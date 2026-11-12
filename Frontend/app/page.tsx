@@ -596,6 +596,11 @@ function FollowUps() {
             )
             .map(assignment => assignment.facility_id)
         ))}
+        noteWritableFacilities={(currentUser?.assignments ?? [])
+          .filter(assignment =>
+            ['clinician', 'platform_admin'].includes(assignment.role)
+          )
+          .map(assignment => assignment.facility_id)}
       />
     )
   }

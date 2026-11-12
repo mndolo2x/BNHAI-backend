@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { EncounterCreateForm } from './encounter-create-form'
+import { EncounterDetails } from './encounter-details'
 import {
   apiRequest,
   formatDateTime,
@@ -14,14 +15,16 @@ type Props = {
   token: string
   patients: PatientName[]
   writableFacilities: string[]
+  noteWritableFacilities: string[]
 }
 
-export function EncounterDirectory({ token, patients, writableFacilities }: Props) {
+export function EncounterDirectory({ token, patients, writableFacilities, noteWritableFacilities }: Props) {
   const [encounters, setEncounters] = useState<ApiEncounter[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refreshCount, setRefreshCount] = useState(0)
   const [formOpen, setFormOpen] = useState(false)
+  const [selectedEncounterId, setSelectedEncounterId] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -51,6 +54,10 @@ export function EncounterDirectory({ token, patients, writableFacilities }: Prop
 
   const names = new Map(
     patients.map(patient => [patient.id, patient.name])
+  )
+
+  const selectedEncounter = encounters.find(
+    item => item.encounter_id === selectedEncounterId
   )
 
   return (
@@ -107,6 +114,20 @@ export function EncounterDirectory({ token, patients, writableFacilities }: Prop
         />
       )}
 
+      {selectedEncounter && (
+        <EncounterDetails
+          key={selectedEncounter.encounter_id}
+          canWriteNotes={noteWritableFacilities.includes(selectedEncounter.facility_id)}
+          token={token}
+          encounterId={selectedEncounter.encounter_id}
+          patientName={
+            names.get(selectedEncounter.patient_id) ??
+            selectedEncounter.patient_id
+          }
+          onClose={() => setSelectedEncounterId(null)}
+        />
+      )}
+
       {loading ? (
         <section className="panel" role="status">
           Loading encounters…
@@ -137,13 +158,14 @@ export function EncounterDirectory({ token, patients, writableFacilities }: Prop
                   <th>Clinician</th>
                   <th>Facility</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
 
               <tbody>
                 {encounters.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="table-empty">
+                    <td colSpan={8} className="table-empty">
                       No encounters recorded for your
                       assigned facilities.
                     </td>
@@ -167,6 +189,17 @@ export function EncounterDirectory({ token, patients, writableFacilities }: Prop
                       <span className="status">
                         {item.status.replaceAll('_', ' ')}
                       </span>
+                    </td>
+                    <td>
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() =>
+                          setSelectedEncounterId(item.encounter_id)
+                        }
+                      >
+                        Open encounter
+                      </button>
                     </td>
                   </tr>
                 ))}
